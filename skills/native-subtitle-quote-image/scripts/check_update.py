@@ -133,6 +133,8 @@ def fetch_latest_release(timeout=4):
                 ],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 check=False,
                 timeout=timeout + 1,
             )

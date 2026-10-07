@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
@@ -678,6 +679,65 @@ class CliIntegrationTests(unittest.TestCase):
             )
             self.assertNotEqual(repeated.returncode, 0)
             self.assertIn("--overwrite", repeated.stderr)
+
+
+class EnvironmentRobustnessTests(unittest.TestCase):
+    def test_environment_check_flags_unimportable_core_dependency(self):
+        """已安装但导入失败的依赖要报缺失，不能让自检抛 traceback 崩掉。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            shadow = Path(tmp) / "PIL.py"
+            shadow.write_text(
+                "raise OSError('broken native dependency')\n", encoding="utf-8"
+            )
+            proc = subprocess.run(
+                [sys.executable, str(ENV_SCRIPT), "--json"],
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                env={**os.environ, "PYTHONPATH": tmp},
+                check=False,
+            )
+            self.assertNotIn("Traceback", proc.stderr)
+            payload = json.loads(proc.stdout)
+            pillow = next(
+                item for item in payload["components"] if item["component"] == "Pillow"
+            )
+            self.assertEqual(pillow["status"], "missing")
+            self.assertFalse(payload["ok"])
+            self.assertEqual(proc.returncode, 1)
+
+
+class NonAsciiPathTests(unittest.TestCase):
+    def test_video_metadata_accepts_non_ascii_path(self):
+        """中文等非 ASCII 路径必须能读元数据；按本地编码解码会直接失败。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            video = Path(tmp) / "法律咨询 测试视频.mp4"
+            subprocess.run(
+                [
+                    MODULE.FFMPEG,
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-y",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "testsrc2=size=640x360:rate=10",
+                    "-t",
+                    "2",
+                    "-c:v",
+                    "mpeg4",
+                    "-pix_fmt",
+                    "yuv420p",
+                    str(video),
+                ],
+                check=True,
+                capture_output=True,
+            )
+            width, height, duration = MODULE.video_metadata(video)
+            self.assertEqual((width, height), (640, 360))
+            self.assertGreaterEqual(duration, 1.9)
 
 
 if __name__ == "__main__":

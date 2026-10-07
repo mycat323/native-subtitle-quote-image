@@ -32,6 +32,8 @@ def command_version(command, args=("--version",)):
             [path, *args],
             capture_output=True,
             text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=10,
             check=False,
         )
@@ -41,10 +43,16 @@ def command_version(command, args=("--version",)):
     return path, output[0] if output else "版本未知"
 
 
+IMPORT_FAILED = "导入失败：已安装但无法导入"
+
+
 def module_version(name):
     if importlib.util.find_spec(name) is None:
         return None
-    module = importlib.import_module(name)
+    try:
+        module = importlib.import_module(name)
+    except Exception:  # pragma: no cover - broken native dependency (e.g. torch DLL)
+        return IMPORT_FAILED
     return getattr(module, "__version__", "已安装")
 
 
@@ -75,7 +83,7 @@ def inspect_environment():
     add(
         rows,
         "Pillow",
-        "ok" if pillow else "missing",
+        "ok" if pillow and pillow != IMPORT_FAILED else "missing",
         "裁图、拼图、导出 JPG",
         str(pillow or "未安装"),
     )
@@ -169,7 +177,8 @@ def inspect_environment():
 
     whisper_cli, whisper_version = command_version("whisper")
     whisper_module = module_version("faster_whisper") or module_version("whisper")
-    whisper_ok = bool(whisper_cli or whisper_module)
+    whisper_broken = whisper_module == IMPORT_FAILED
+    whisper_ok = bool(whisper_cli) or bool(whisper_module and not whisper_broken)
     whisper_detail = "未安装；只有来源没有可用时间轴时才需要"
     if whisper_cli:
         whisper_detail = f"CLI {whisper_version} ({whisper_cli})"
